@@ -20,6 +20,13 @@ export const config = {
   get briefTime() {
     return process.env.BRIEF_TIME || "08:30";
   },
+  // Fenêtre dans laquelle on cherche du temps libre (heure locale).
+  get journeeDebut() {
+    return process.env.JOURNEE_DEBUT || "09:00";
+  },
+  get journeeFin() {
+    return process.env.JOURNEE_FIN || "22:00";
+  },
   // Liste séparée par des virgules : emails complets ou domaines (@vub.be).
   get prioritySenders() {
     return (process.env.PRIORITY_SENDERS || "")

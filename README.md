@@ -9,7 +9,7 @@ alertes sur une seule page, plus un résumé envoyé par email chaque matin.
 ## État d'avancement
 
 - [x] (a) Projet de base et connexion (Supabase Auth via Google, accès limité à un email)
-- [ ] (b) Google OAuth et agenda
+- [x] (b) Google OAuth et agenda
 - [ ] (c) Emails et classification
 - [ ] (d) Tâches et alertes
 - [ ] (e) Cron et résumé par email
