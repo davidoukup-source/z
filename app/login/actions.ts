@@ -11,6 +11,9 @@ export async function signInWithGoogle() {
     provider: "google",
     options: { redirectTo: `${config.appUrl}/auth/callback` },
   });
-  if (error || !data.url) redirect("/login?erreur=connexion");
+  if (error || !data.url) {
+    console.error("signInWithOAuth :", error?.message);
+    redirect(`/login?erreur=connexion&detail=${encodeURIComponent(error?.message ?? "URL de connexion absente")}`);
+  }
   redirect(data.url);
 }
