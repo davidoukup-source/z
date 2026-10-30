@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { BoutonResume } from "@/components/bouton-resume";
 import { AgendaSection } from "@/components/sections/agenda";
 import { AlertesSection } from "@/components/sections/alertes";
 import { ConnexionsSection, type EtatGoogle } from "@/components/sections/connexions";
@@ -107,7 +108,10 @@ export default async function HomePage({
       </header>
 
       <Section id="une-ligne" titre="Aujourd'hui en une ligne">
-        <p className="text-base">{ligneDuJour(analyseAujourdhui, tachePrincipale(groupes))}</p>
+        <div className="flex flex-col gap-4">
+          <p className="text-base">{ligneDuJour(analyseAujourdhui, tachePrincipale(groupes))}</p>
+          <BoutonResume />
+        </div>
       </Section>
 
       <AgendaSection jour={jour} aujourdhui={aujourdhui} tz={tz} analyse={analyseJour} erreur={erreurAgenda} />
