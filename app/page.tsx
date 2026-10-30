@@ -1,23 +1,30 @@
 import { Suspense } from "react";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { AgendaSection } from "@/components/sections/agenda";
+import { AlertesSection } from "@/components/sections/alertes";
 import { ConnexionsSection, type EtatGoogle } from "@/components/sections/connexions";
 import { EmailsChargement, EmailsSection } from "@/components/sections/emails";
-import { Section, Vide } from "@/components/sections/section";
+import { Section } from "@/components/sections/section";
+import { TachesSection, type GroupesVue, type TacheVue } from "@/components/sections/taches";
 import { Button } from "@/components/ui/button";
-import { analyserJournee, type AnalyseJournee } from "@/lib/agenda";
+import { analyserJournee, evenementsDuJour, type AnalyseJournee } from "@/lib/agenda";
+import { calculerAlertes } from "@/lib/alertes";
 import { ClaudeRefusalError } from "@/lib/anthropic";
 import { config } from "@/lib/config";
 import { chargerEmails, type ResultatEmails } from "@/lib/emails";
-import { listEvents } from "@/lib/google/calendar";
+import { chargerEvenements } from "@/lib/evenements";
+import type { CalEvent } from "@/lib/google/calendar";
 import { GoogleReconnectError } from "@/lib/google/oauth";
-import { getAccessToken, getGoogleIntegration, markSynced } from "@/lib/google/tokens";
-import type { SupabaseClient } from "@supabase/supabase-js";
-
+import { getAccessToken, getGoogleIntegration } from "@/lib/google/tokens";
+import { ligneDuJour } from "@/lib/resume-jour";
 import { createClient } from "@/lib/supabase/server";
-import { addDays, dayBounds, isValidYmd, localDate } from "@/lib/time";
+import { aUneHeure, chargerTaches, grouperTaches, tachePrincipale, type Tache } from "@/lib/taches";
+import { addDays, formatJourCourt, isValidYmd, localDate, localTime } from "@/lib/time";
 
 export const dynamic = "force-dynamic";
+
+type EmailsCharges = { resultat: ResultatEmails | null; erreur: string | null };
 
 export default async function HomePage({
   searchParams,
@@ -26,6 +33,7 @@ export default async function HomePage({
 }) {
   const params = await searchParams;
   const tz = config.timezone;
+  const fenetre = { debut: config.journeeDebut, fin: config.journeeFin };
   const supabase = await createClient();
   const {
     data: { user },
@@ -38,20 +46,16 @@ export default async function HomePage({
       ? params.jour
       : aujourdhui;
 
-  // --- Google : token + agenda du jour choisi ---
+  // --- Google Agenda : un seul appel pour 14 jours ---
   const integration = await getGoogleIntegration(supabase, user.id);
   let etatGoogle: EtatGoogle = integration ? "connecte" : "non_connecte";
-  let analyse: AnalyseJournee | null = null;
   let erreurAgenda: string | null = integration ? null : "Connecte Google pour voir ton agenda.";
   let derniereSync = integration?.derniere_synchronisation ?? null;
+  let events: CalEvent[] | null = null;
 
   if (integration) {
     try {
-      const token = await getAccessToken(supabase, user.id);
-      const { debut, fin } = dayBounds(jour, tz);
-      const events = await listEvents(token, debut, fin);
-      analyse = analyserJournee(events, jour, tz, { debut: config.journeeDebut, fin: config.journeeFin });
-      await markSynced(supabase, user.id);
+      events = await chargerEvenements(supabase, user.id, tz);
       derniereSync = new Date().toISOString();
     } catch (e) {
       if (e instanceof GoogleReconnectError) {
@@ -64,6 +68,29 @@ export default async function HomePage({
       }
     }
   }
+
+  const analyse = (ymd: string): AnalyseJournee | null =>
+    events ? analyserJournee(evenementsDuJour(events, ymd, tz), ymd, tz, fenetre) : null;
+  const analyseAujourdhui = analyse(aujourdhui);
+  const analyseJour = jour === aujourdhui ? analyseAujourdhui : analyse(jour);
+
+  // --- Tâches ---
+  const taches = await chargerTaches(supabase, user.id, tz);
+  const groupes = grouperTaches(taches, tz);
+
+  // --- Emails : chargés en parallèle, partagés entre la section Emails et les alertes ---
+  const emails: Promise<EmailsCharges> =
+    etatGoogle === "connecte"
+      ? chargerEmailsSansErreur(supabase, user.id, tz)
+      : Promise.resolve({ resultat: null, erreur: "Connecte Google pour voir tes emails." });
+
+  const vue = (t: Tache): TacheVue => vueTache(t, tz, aujourdhui);
+  const groupesVue: GroupesVue = [
+    { titre: "En retard", taches: groupes.enRetard.map(vue), vide: "Rien en retard." },
+    { titre: "Aujourd'hui", taches: groupes.aujourdhui.map(vue), vide: "Rien de prévu aujourd'hui." },
+    { titre: "3 prochains jours", taches: groupes.prochainsJours.map(vue), vide: "Rien dans les 3 prochains jours." },
+    { titre: "Plus tard / sans date", taches: groupes.plusTard.map(vue), vide: "Aucune autre tâche." },
+  ];
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-4 p-4 sm:p-6">
@@ -80,49 +107,87 @@ export default async function HomePage({
       </header>
 
       <Section id="une-ligne" titre="Aujourd'hui en une ligne">
-        <Vide>Arrive à la phase (d).</Vide>
+        <p className="text-base">{ligneDuJour(analyseAujourdhui, tachePrincipale(groupes))}</p>
       </Section>
 
-      <AgendaSection jour={jour} aujourdhui={aujourdhui} tz={tz} analyse={analyse} erreur={erreurAgenda} />
+      <AgendaSection jour={jour} aujourdhui={aujourdhui} tz={tz} analyse={analyseJour} erreur={erreurAgenda} />
 
-      {etatGoogle === "connecte" ? (
-        <Suspense fallback={<EmailsChargement />}>
-          <Emails supabase={supabase} userId={user.id} tz={tz} />
+      <Suspense fallback={<EmailsChargement />}>
+        <Emails promesse={emails} tz={tz} />
+      </Suspense>
+
+      <TachesSection groupes={groupesVue} />
+
+      {events && analyseAujourdhui ? (
+        <Suspense fallback={<AlertesSection alertes={null} note="Calcul en cours…" />}>
+          <Alertes
+            promesse={emails}
+            calcul={(e) =>
+              calculerAlertes({ events, aujourdhui, analyseAujourdhui, groupes, emails: e, tz })
+            }
+          />
         </Suspense>
       ) : (
-        <EmailsSection resultat={null} erreur="Connecte Google pour voir tes emails." tz={tz} />
+        <AlertesSection alertes={null} erreur="Connecte Google pour activer les alertes." />
       )}
 
-      <Section id="taches" titre="Tâches">
-        <Vide>Arrive à la phase (d).</Vide>
-      </Section>
-
-      <Section id="alertes" titre="Alertes croisées">
-        <Vide>Arrive à la phase (d).</Vide>
-      </Section>
-
-      <ConnexionsSection
-        etat={etatGoogle}
-        derniereSync={derniereSync}
-        tz={tz}
-        retour={params.google}
-      />
+      <ConnexionsSection etat={etatGoogle} derniereSync={derniereSync} tz={tz} retour={params.google} />
     </main>
   );
 }
 
-// Composant asynchrone séparé : l'agenda s'affiche pendant que Claude trie les emails.
-async function Emails({ supabase, userId, tz }: { supabase: SupabaseClient; userId: string; tz: string }) {
-  let resultat: ResultatEmails | null = null;
-  let erreur: string | null = null;
+function vueTache(t: Tache, tz: string, aujourdhui: string): TacheVue {
+  let date = "";
+  let heure = "";
+  let echeance = "";
+  if (t.date_limite) {
+    const d = new Date(t.date_limite);
+    date = localDate(d, tz);
+    heure = aUneHeure(t.date_limite, tz) ? localTime(d, tz) : "";
+    const libelleJour =
+      date === aujourdhui ? "Aujourd'hui" : date === addDays(aujourdhui, 1) ? "Demain" : formatJourCourt(date, tz);
+    echeance = heure ? `${libelleJour} ${heure}` : libelleJour;
+  }
+  return {
+    id: t.id,
+    titre: t.titre,
+    description: t.description ?? "",
+    priorite: t.priorite,
+    statut: t.statut,
+    projet: t.projet ?? "",
+    date,
+    heure,
+    echeance,
+  };
+}
+
+async function chargerEmailsSansErreur(supabase: SupabaseClient, userId: string, tz: string): Promise<EmailsCharges> {
   try {
     const token = await getAccessToken(supabase, userId);
-    resultat = await chargerEmails({ supabase, userId, token, prioritaires: config.prioritySenders, tz });
+    const resultat = await chargerEmails({ supabase, userId, token, prioritaires: config.prioritySenders, tz });
+    return { resultat, erreur: null };
   } catch (e) {
     console.error("Emails :", e);
-    if (e instanceof GoogleReconnectError) erreur = e.message;
-    else if (e instanceof ClaudeRefusalError) erreur = "Claude a refusé de trier ces emails.";
-    else erreur = "Impossible de trier les emails pour le moment.";
+    if (e instanceof GoogleReconnectError) return { resultat: null, erreur: e.message };
+    if (e instanceof ClaudeRefusalError) return { resultat: null, erreur: "Claude a refusé de trier ces emails." };
+    return { resultat: null, erreur: "Impossible de trier les emails pour le moment." };
   }
+}
+
+// Composants asynchrones : l'agenda et les tâches s'affichent pendant le tri des emails.
+async function Emails({ promesse, tz }: { promesse: Promise<EmailsCharges>; tz: string }) {
+  const { resultat, erreur } = await promesse;
   return <EmailsSection resultat={resultat} erreur={erreur} tz={tz} />;
+}
+
+async function Alertes({
+  promesse,
+  calcul,
+}: {
+  promesse: Promise<EmailsCharges>;
+  calcul: (emails: ResultatEmails["repondre"] | null) => ReturnType<typeof calculerAlertes>;
+}) {
+  const { resultat } = await promesse;
+  const emails = resultat ? [...resultat.repondre, ...resultat.attente, ...resultat.informatifs] : null;
+  return <AlertesSection alertes={calcul(emails)} />;
 }

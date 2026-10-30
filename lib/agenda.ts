@@ -1,5 +1,5 @@
 import type { CalEvent } from "@/lib/google/calendar";
-import { zonedToUtc } from "@/lib/time";
+import { dayBounds, zonedToUtc } from "@/lib/time";
 
 const MIN = 60_000;
 export const ECART_SERRE_MIN = 15;
@@ -94,4 +94,9 @@ export function minutesOccupees(evenements: CalEvent[]): number {
 
 export function minutesLibres(libres: Creneau[]): number {
   return Math.round(libres.reduce((s, c) => s + (+c.fin - +c.debut), 0) / MIN);
+}
+
+export function evenementsDuJour(events: CalEvent[], ymd: string, tz: string): CalEvent[] {
+  const { debut, fin } = dayBounds(ymd, tz);
+  return events.filter((e) => e.debut < fin && e.fin > debut);
 }
