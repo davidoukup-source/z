@@ -10,7 +10,7 @@ alertes sur une seule page, plus un résumé envoyé par email chaque matin.
 
 - [x] (a) Projet de base et connexion (Supabase Auth via Google, accès limité à un email)
 - [x] (b) Google OAuth et agenda
-- [ ] (c) Emails et classification
+- [x] (c) Emails et classification (Claude si clé API, sinon règles gratuites)
 - [ ] (d) Tâches et alertes
 - [ ] (e) Cron et résumé par email
 

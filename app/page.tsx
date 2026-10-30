@@ -1,12 +1,19 @@
+import { Suspense } from "react";
+
 import { AgendaSection } from "@/components/sections/agenda";
 import { ConnexionsSection, type EtatGoogle } from "@/components/sections/connexions";
+import { EmailsChargement, EmailsSection } from "@/components/sections/emails";
 import { Section, Vide } from "@/components/sections/section";
 import { Button } from "@/components/ui/button";
 import { analyserJournee, type AnalyseJournee } from "@/lib/agenda";
+import { ClaudeRefusalError } from "@/lib/anthropic";
 import { config } from "@/lib/config";
+import { chargerEmails, type ResultatEmails } from "@/lib/emails";
 import { listEvents } from "@/lib/google/calendar";
 import { GoogleReconnectError } from "@/lib/google/oauth";
 import { getAccessToken, getGoogleIntegration, markSynced } from "@/lib/google/tokens";
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import { createClient } from "@/lib/supabase/server";
 import { addDays, dayBounds, isValidYmd, localDate } from "@/lib/time";
 
@@ -78,9 +85,13 @@ export default async function HomePage({
 
       <AgendaSection jour={jour} aujourdhui={aujourdhui} tz={tz} analyse={analyse} erreur={erreurAgenda} />
 
-      <Section id="emails" titre="Emails">
-        <Vide>Arrive à la phase (c).</Vide>
-      </Section>
+      {etatGoogle === "connecte" ? (
+        <Suspense fallback={<EmailsChargement />}>
+          <Emails supabase={supabase} userId={user.id} tz={tz} />
+        </Suspense>
+      ) : (
+        <EmailsSection resultat={null} erreur="Connecte Google pour voir tes emails." tz={tz} />
+      )}
 
       <Section id="taches" titre="Tâches">
         <Vide>Arrive à la phase (d).</Vide>
@@ -98,4 +109,20 @@ export default async function HomePage({
       />
     </main>
   );
+}
+
+// Composant asynchrone séparé : l'agenda s'affiche pendant que Claude trie les emails.
+async function Emails({ supabase, userId, tz }: { supabase: SupabaseClient; userId: string; tz: string }) {
+  let resultat: ResultatEmails | null = null;
+  let erreur: string | null = null;
+  try {
+    const token = await getAccessToken(supabase, userId);
+    resultat = await chargerEmails({ supabase, userId, token, prioritaires: config.prioritySenders, tz });
+  } catch (e) {
+    console.error("Emails :", e);
+    if (e instanceof GoogleReconnectError) erreur = e.message;
+    else if (e instanceof ClaudeRefusalError) erreur = "Claude a refusé de trier ces emails.";
+    else erreur = "Impossible de trier les emails pour le moment.";
+  }
+  return <EmailsSection resultat={resultat} erreur={erreur} tz={tz} />;
 }
