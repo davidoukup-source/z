@@ -31,17 +31,27 @@ chaque matin un résumé par email.
   `Authorization: Bearer <CRON_SECRET>` (comparaison à temps constant).
 - Aucune clé dans le code : tout passe par les variables d'environnement.
 
-## Pourquoi l'app Google reste en mode « Test »
+## App Google : « En production » sans vérification
 
-`gmail.readonly` est un scope **restreint**. Pour publier une app qui l'utilise, Google exige une
-vérification (et, pour les scopes restreints, un audit de sécurité payant). Pour un usage
-personnel, le mode Test suffit : seuls les « utilisateurs de test » déclarés peuvent se
-connecter, et l'écran « Google n'a pas validé cette application » s'affiche (on clique sur
-Continuer).
+`gmail.readonly` est un scope **restreint**. Pour une app publique, Google exige une
+vérification (et un audit de sécurité payant). Pour un usage personnel, ce n'est pas
+nécessaire :
 
-**Contrepartie** : en mode Test, Google fait expirer le refresh token **au bout de 7 jours**.
-Il faut donc cliquer sur **Reconnecter** (section « Statut des connexions ») environ une fois
-par semaine. Le résumé du matin signale quand la connexion a expiré.
+- **En mode « Test »**, seuls les utilisateurs de test peuvent se connecter, mais Google fait
+  expirer le refresh token **au bout de 7 jours** : il faut cliquer sur **Reconnecter** chaque
+  semaine.
+- **En mode « En production » sans vérification** (choix actuel), l'écran « Google n'a pas
+  validé cette application » s'affiche à chaque connexion (Paramètres avancés → Accéder à
+  Tableau de Vie), le bandeau « Votre application doit être validée » reste dans la console,
+  mais le refresh token n'expire plus au bout de 7 jours. Seul `ALLOWED_EMAIL` peut de toute
+  façon utiliser l'app.
+
+Pour passer en production, Google demande une page d'accueil (`/login`) et une politique de
+confidentialité (`/confidentialite`) dans **Branding**. Après le passage en production, il faut
+se **reconnecter une fois** : un token obtenu en mode Test garde la limite de 7 jours.
+
+Si Google bloque un jour l'accès, cliquer sur **Revenir au mode test** dans **Audience** et se
+reconnecter chaque semaine. Le résumé du matin signale quand la connexion a expiré.
 
 ## Variables d'environnement
 
@@ -100,8 +110,10 @@ redirection du client Google.
 
 ### 2. Google Cloud
 1. Crée un projet, active **Google Calendar API** et **Gmail API**.
-2. **Google Auth Platform** : cible *Externe*, état **En test**, ajoute ton email dans les
-   utilisateurs de test, ajoute les scopes `calendar.readonly` et `gmail.readonly`.
+2. **Google Auth Platform** : cible *Externe*, ajoute ton email dans les utilisateurs de test,
+   ajoute les scopes `calendar.readonly` et `gmail.readonly`. Dans **Branding**, renseigne la page
+   d'accueil (`/login`), la politique de confidentialité (`/confidentialite`) et le domaine
+   autorisé, puis **Audience → Publier l'application** (voir plus haut).
 3. **Clients → Créer un client → Application Web**, avec ces URI de redirection :
    - la Callback URL Supabase (`https://<ref>.supabase.co/auth/v1/callback`)
    - `https://<ton-app>.vercel.app/api/google/callback`
